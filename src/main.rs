@@ -1,15 +1,11 @@
 use std::f32::consts::PI;
 
+mod camera_controller;
+use crate::camera_controller::*;
 use bevy::{
-    color::palettes::css::*,
-    core_pipeline::bloom::Bloom,
-    input::mouse::MouseMotion,
-    pbr::CascadeShadowConfigBuilder,
-    prelude::*,
-    // ecs::query,
-    window::CursorGrabMode,
+    color::palettes::css::*, core_pipeline::bloom::Bloom, input::mouse::MouseMotion,
+    input::mouse::MouseWheel, pbr::CascadeShadowConfigBuilder, prelude::*, window::CursorGrabMode,
 };
-
 const WINDOW_WIDTH: f32 = 1920.0;
 const WINDOW_HEIGHT: f32 = 1080.0;
 
@@ -31,16 +27,6 @@ fn main() {
         .run();
 }
 
-#[derive(Component, Default)]
-struct CameraController {
-    pitch: f32,
-    yaw: f32,
-    sensitivity: f32,
-    velocity: Vec2,
-    smoothing: f32,
-    speed: f32,
-}
-
 fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let pitch: f32 = -PI / 4.0;
     let yaw: f32 = PI / 4.0;
@@ -53,6 +39,7 @@ fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
             velocity: Vec2::ZERO,
             smoothing: 0.15,
             speed: 50.0,
+            zoom: 50.0,
         },
         Transform {
             translation: Vec3 {
@@ -128,6 +115,7 @@ fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut mouse_movement: EventReader<MouseMotion>,
+    mut mousewheel_event: EventReader<MouseWheel>,
     mut query: Query<(&mut Transform, &mut CameraController), With<Camera3d>>,
     // light: ResMut<AmbientLight>,
     time: Res<Time>,
@@ -163,18 +151,24 @@ fn handle_input(
             transform.translation.z -=
                 time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
         }
-        if keyboard_input.pressed(KeyCode::Space) {
-            // transform.translation.y += time.delta_secs() * camera_controller.speed * 5.0;
-        }
+
         if keyboard_input.pressed(KeyCode::ShiftLeft) {
-            // transform.translation.y -= time.delta_secs() * camera_controller.speed * 5.0;
+            camera_controller.speed = 100.0;
+        } else {
+            camera_controller.speed = 50.0;
         }
-        if keyboard_input.pressed(KeyCode::ArrowUp) {
-            // light.brightness += 0.01;
+
+        for event in mousewheel_event.read() {
+            if event.y < 0.0 {
+                camera_controller.zoom_in(10.0);
+                println!("Zoom in: {}", camera_controller.zoom);
+            } else if event.y > 0.0 {
+                camera_controller.zoom_out(10.0);
+                println!("Zoom out: {}", camera_controller.zoom);
+            }
+            transform.translation.y = 10.0 + camera_controller.zoom;
         }
-        if keyboard_input.pressed(KeyCode::ArrowDown) {
-            // light.brightness -= 0.01;
-        }
+
         if mouse_input.pressed(MouseButton::Right) {
             if let Ok(mut window) = windows.single_mut() {
                 window.cursor_options.grab_mode = CursorGrabMode::Locked;
@@ -189,7 +183,7 @@ fn handle_input(
             camera_controller.yaw -= camera_controller.velocity.x * camera_controller.sensitivity;
             camera_controller.pitch -= camera_controller.velocity.y * camera_controller.sensitivity;
 
-            camera_controller.pitch = camera_controller.pitch.clamp(-PI / 2.0, PI / 2.0);
+            camera_controller.pitch = camera_controller.pitch.clamp(-PI / 2.0, 0.0);
 
             if camera_controller.yaw > 2.0 * PI {
                 camera_controller.yaw -= 2.0 * PI;
