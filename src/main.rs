@@ -42,17 +42,27 @@ struct CameraController {
 }
 
 fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let pitch: f32 = -PI / 4.0;
+    let yaw: f32 = PI / 4.0;
     commands.spawn((
         Camera3d { ..default() },
         CameraController {
-            pitch: 0.0,
-            yaw: 0.0,
+            pitch: pitch,
+            yaw: yaw,
             sensitivity: 0.002,
             velocity: Vec2::ZERO,
             smoothing: 0.15,
-            speed: 5.0,
+            speed: 50.0,
         },
-        Transform::from_xyz(0.0, 10.0, 0.0),
+        Transform {
+            translation: Vec3 {
+                x: 77.0,
+                y: 100.0,
+                z: 77.0,
+            },
+            rotation: Quat::from_rotation_x(pitch) * Quat::from_rotation_y(yaw),
+            ..default()
+        },
     ));
     commands.spawn(Bloom {
         intensity: 0.3,
@@ -114,27 +124,6 @@ fn update(
     }
 }
 
-// fn handle_light(
-//     keyboard_input: Res<ButtonInput<KeyCode>>,
-//     query: Query<&mut CameraController>,
-//     mut counter: Local<f32>,
-// ) {
-//     for mut camera in query {
-//         if *counter == 0.0 {
-//             *counter = 0.85;
-//         }
-//         if keyboard_input.just_pressed(KeyCode::ArrowUp) {
-//             *counter += 0.05;
-//         }
-//         if keyboard_input.just_pressed(KeyCode::ArrowDown) {
-//             *counter -= 0.05;
-//         }
-//         *counter = counter.clamp(0.01, 0.9999);
-//         // camera.smoothing = *counter;
-//         // println!("{}", camera.smoothing);
-//     }
-// }
-
 fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
@@ -145,28 +134,40 @@ fn handle_input(
     mut windows: Query<&mut Window>,
 ) {
     for (mut transform, mut camera_controller) in query.iter_mut() {
-        let height: f32 = transform.translation.y;
+        //TODO: Create a normalized movement vector. Declare a new Vec3 here at zero, then add movements to
+        //the movement vector, then at the bottom of the function normalize the vector and THEN add to the
+        //movement translation
         if keyboard_input.pressed(KeyCode::KeyW) {
-            let forward: Vec3 = *transform.forward();
-            transform.translation += forward * time.delta_secs() * camera_controller.speed * height;
+            transform.translation.x -=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
+            transform.translation.z -=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
         }
         if keyboard_input.pressed(KeyCode::KeyA) {
-            let left: Vec3 = *transform.left();
-            transform.translation += left * time.delta_secs() * camera_controller.speed * height;
+            // Swap the cos() and sin() functions here and then negate the sin()
+            // Found this trick online, do the opposite for D key to strafe right
+            transform.translation.x -=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
+            transform.translation.z +=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
         }
         if keyboard_input.pressed(KeyCode::KeyS) {
-            let back: Vec3 = *transform.back();
-            transform.translation += back * time.delta_secs() * camera_controller.speed * height;
+            transform.translation.x +=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
+            transform.translation.z +=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
         }
         if keyboard_input.pressed(KeyCode::KeyD) {
-            let right: Vec3 = *transform.right();
-            transform.translation += right * time.delta_secs() * camera_controller.speed * height;
+            transform.translation.x +=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
+            transform.translation.z -=
+                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
         }
         if keyboard_input.pressed(KeyCode::Space) {
-            transform.translation.y += time.delta_secs() * camera_controller.speed * 5.0;
+            // transform.translation.y += time.delta_secs() * camera_controller.speed * 5.0;
         }
         if keyboard_input.pressed(KeyCode::ShiftLeft) {
-            transform.translation.y -= time.delta_secs() * camera_controller.speed * 5.0;
+            // transform.translation.y -= time.delta_secs() * camera_controller.speed * 5.0;
         }
         if keyboard_input.pressed(KeyCode::ArrowUp) {
             // light.brightness += 0.01;
