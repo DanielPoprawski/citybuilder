@@ -3,8 +3,13 @@ use std::f32::consts::PI;
 mod camera_controller;
 use crate::camera_controller::*;
 use bevy::{
-    color::palettes::css::*, core_pipeline::bloom::Bloom, input::mouse::MouseMotion,
-    input::mouse::MouseWheel, pbr::CascadeShadowConfigBuilder, prelude::*, window::CursorGrabMode,
+    color::palettes::css::*,
+    core_pipeline::bloom::Bloom,
+    input::mouse::{MouseMotion, MouseWheel},
+    pbr::CascadeShadowConfigBuilder,
+    prelude::*,
+    transform,
+    window::CursorGrabMode,
 };
 const WINDOW_WIDTH: f32 = 1920.0;
 const WINDOW_HEIGHT: f32 = 1080.0;
@@ -40,6 +45,9 @@ fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
             smoothing: 0.15,
             speed: 50.0,
             zoom: 50.0,
+            focus_point: Vec3::ZERO,
+            orbit: 0.0,
+            zoom2: 0.0,
         },
         Transform {
             translation: Vec3 {
@@ -104,8 +112,13 @@ fn update(
         for mut text in text_query.iter_mut() {
             text.clear();
             text.push_str(&format!(
-                "x: {}\ny: {}\nz: {}\npitch: {}\nyaw: {}",
-                trans.x, trans.y, trans.z, camera_controller.pitch, camera_controller.yaw
+                "x: {}\ny: {}\nz: {}\npitch: {}\nyaw: {}\norbit: {}",
+                trans.x,
+                trans.y,
+                trans.z,
+                camera_controller.pitch,
+                camera_controller.yaw,
+                camera_controller.orbit
             ));
         }
     }
@@ -125,32 +138,6 @@ fn handle_input(
         //TODO: Create a normalized movement vector. Declare a new Vec3 here at zero, then add movements to
         //the movement vector, then at the bottom of the function normalize the vector and THEN add to the
         //movement translation
-        if keyboard_input.pressed(KeyCode::KeyW) {
-            transform.translation.x -=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
-            transform.translation.z -=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
-        }
-        if keyboard_input.pressed(KeyCode::KeyA) {
-            // Swap the cos() and sin() functions here and then negate the sin()
-            // Found this trick online, do the opposite for D key to strafe right
-            transform.translation.x -=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
-            transform.translation.z +=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
-        }
-        if keyboard_input.pressed(KeyCode::KeyS) {
-            transform.translation.x +=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
-            transform.translation.z +=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
-        }
-        if keyboard_input.pressed(KeyCode::KeyD) {
-            transform.translation.x +=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.cos();
-            transform.translation.z -=
-                time.delta_secs() * camera_controller.speed * camera_controller.yaw.sin();
-        }
 
         if keyboard_input.pressed(KeyCode::ShiftLeft) {
             camera_controller.speed = 100.0;
@@ -158,32 +145,52 @@ fn handle_input(
             camera_controller.speed = 50.0;
         }
 
-        for event in mousewheel_event.read() {
-            if event.y < 0.0 {
-                camera_controller.zoom_in(10.0);
-                println!("Zoom in: {}", camera_controller.zoom);
-            } else if event.y > 0.0 {
-                camera_controller.zoom_out(10.0);
-                println!("Zoom out: {}", camera_controller.zoom);
-            }
-            transform.translation.y = 10.0 + camera_controller.zoom;
+        if keyboard_input.pressed(KeyCode::KeyW) {
+            camera_controller.forward(time.delta_secs());
         }
 
+        if keyboard_input.pressed(KeyCode::KeyA) {
+            camera_controller.left(time.delta_secs());
+        }
+
+        if keyboard_input.pressed(KeyCode::KeyS) {
+            camera_controller.back(time.delta_secs());
+        }
+
+        if keyboard_input.pressed(KeyCode::KeyD) {
+            camera_controller.right(time.delta_secs());
+        }
+
+        camera_controller.update_transform(&mut transform);
+
+        // for event in mousewheel_event.read() {
+        //     if event.y < 0.0 {
+        //         camera_controller.zoom_in(10.0);
+        //     } else if event.y > 0.0 {
+        //         camera_controller.zoom_out(10.0);
+        //     }
+        //     transform.translation.y = 10.0 + camera_controller.zoom;
+        // }
+        //
         if mouse_input.pressed(MouseButton::Right) {
             if let Ok(mut window) = windows.single_mut() {
                 window.cursor_options.grab_mode = CursorGrabMode::Locked;
                 window.cursor_options.visible = false;
             }
+
             let mut cumulative_movement = Vec2::ZERO;
             for event in mouse_movement.read() {
                 cumulative_movement += event.delta;
             }
-            camera_controller.velocity = camera_controller.velocity * camera_controller.smoothing
-                + cumulative_movement * (1.0 - camera_controller.smoothing);
-            camera_controller.yaw -= camera_controller.velocity.x * camera_controller.sensitivity;
-            camera_controller.pitch -= camera_controller.velocity.y * camera_controller.sensitivity;
 
-            camera_controller.pitch = camera_controller.pitch.clamp(-PI / 2.0, 0.0);
+            camera_controller.rotate_x(cumulative_movement.x, transform);
+
+            // camera_controller.velocity = camera_controller.velocity * camera_controller.smoothing
+            //     + cumulative_movement * (1.0 - camera_controller.smoothing);
+            // camera_controller.yaw -= camera_controller.velocity.x * camera_controller.sensitivity;
+            // camera_controller.pitch -= camera_controller.velocity.y * camera_controller.sensitivity;
+            //
+            // camera_controller.pitch = camera_controller.pitch.clamp(-PI / 2.0, 0.0);
 
             if camera_controller.yaw > 2.0 * PI {
                 camera_controller.yaw -= 2.0 * PI;
@@ -199,8 +206,8 @@ fn handle_input(
                 window.cursor_options.visible = true;
             }
         }
-        let yaw_quat = Quat::from_rotation_y(camera_controller.yaw);
-        let pitch_quat = Quat::from_rotation_x(camera_controller.pitch);
-        transform.rotation = yaw_quat * pitch_quat;
+        // let yaw_quat = Quat::from_rotation_y(camera_controller.yaw);
+        // let pitch_quat = Quat::from_rotation_x(camera_controller.pitch);
+        // transform.rotation = yaw_quat * pitch_quat;
     }
 }
