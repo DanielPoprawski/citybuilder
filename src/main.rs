@@ -31,7 +31,6 @@ fn main() {
             ..Default::default()
         }))
         .add_systems(Startup, startup)
-        // .add_systems(Update, update)
         .add_systems(Update, handle_input)
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
