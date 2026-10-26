@@ -7,7 +7,47 @@ use bevy::{
 };
 use noise::{NoiseFn, Perlin};
 
-pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32) -> Mesh {
+use bevy::prelude::*;
+use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
+use bevy_inspector_egui::prelude::*;
+use rand::random;
+
+#[derive(Resource, Reflect, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
+pub struct TerrainParams {
+    #[inspector(min = 1, max = 12, display = NumberDisplay::Slider)]
+    pub octaves: u32,
+    #[inspector(min = -3.0, max = 3.0, display = NumberDisplay::Slider)]
+    pub gain: f64,
+    #[inspector(min = -3.0, max = 3.0, display = NumberDisplay::Slider)]
+    pub lacunarity: f64,
+    #[inspector(min = -3.0, max = 3.0, display = NumberDisplay::Slider)]
+    pub frequency: f64,
+    #[inspector(min = 0.0, max = 100.0, display = NumberDisplay::Slider)]
+    pub amplitude: f64,
+    pub seed: u32,
+}
+
+#[derive(Component)]
+pub struct Chunk {
+    pub x: u64,
+    pub z: u64,
+}
+
+impl Default for TerrainParams {
+    fn default() -> Self {
+        Self {
+            octaves: 8,       // 4-6 is ideal
+            gain: 0.4,        // -0.5 to 0.5
+            lacunarity: 2.0,  // around 2
+            frequency: 0.002, // 0.001 - 0.0001
+            amplitude: 40.0,  // 10 - 40
+            seed: random(),
+        }
+    }
+}
+
+pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32, params: &TerrainParams) -> Mesh {
     let x_offset = x * (size - 1); // Prevents seams
     let z_offset = z * (size - 1);
 
@@ -24,10 +64,30 @@ pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32) -> Mesh {
             let world_j = z_offset + j;
 
             // Slope terrain using absolute coordinates
-            let mut y = perlin.get([world_i as f64 * 0.003, world_j as f64 * 0.003]) * 0.5;
-            y += perlin.get([world_i as f64 * 0.01, world_j as f64 * 0.01]) * 10.;
-            y += perlin.get([world_i as f64 * 0.0002, world_j as f64 * 0.0002]) * 100.;
-            y += perlin.get([world_i as f64 * 0.000003, world_j as f64 * 0.000003]) * 10000.;
+            let mut y = 0.0;
+            // let octaves = 8;
+            //
+            // let mut amplitude = 40.0; // Size of the hills
+            // let mut frequency = 0.002; // Width of the hills
+
+            let mut amplitude = params.amplitude; // Size of the hills
+            let mut frequency = params.frequency; // Width of the hills
+                                                  // let gain = 0.4; // How quickly the amplitude decreases, how noisy the terrain is
+                                                  // let lacunarity = 2.0; // How quickly the frequency increases, how detailed the terrain is
+
+            for i in 0..params.octaves {
+                let o: f64 = i as f64 * 17.13;
+                y += (1.
+                    - perlin
+                    .get([
+                        world_i as f64 * frequency + o,
+                        world_j as f64 * frequency - o,
+                    ])
+                    .abs()).powf(2.78) // -abs() to make sharper ridges and crests 
+                    * amplitude;
+                amplitude *= params.gain;
+                frequency *= params.lacunarity;
+            }
 
             positions.push([i as f32, y as f32, j as f32]); // local coordinates
 

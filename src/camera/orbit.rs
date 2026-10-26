@@ -11,7 +11,6 @@ pub struct OrbitCamera {
     pub z: f32,
     pub pitch: f32,
     pub yaw: f32,
-    pub distance: f32,
     pub sensitivity: f32,
     pub velocity: Vec2,
     pub speed: f32,
@@ -24,9 +23,9 @@ impl OrbitCamera {
         // low, ensures camera doesn't flip upside
         // down
 
-        transform.translation.x = self.x;
+        transform.translation.x = self.x + 1.667 * self.y * self.yaw.sin();
         transform.translation.y = self.y;
-        transform.translation.z = self.z;
+        transform.translation.z = self.z + 1.667 * self.y * self.yaw.cos();
 
         let yaw = Quat::from_rotation_y(self.yaw);
         let pitch = Quat::from_rotation_x(self.pitch);
@@ -40,7 +39,6 @@ impl Default for OrbitCamera {
         Self {
             pitch: -PI / 6.,
             yaw: 0.,
-            distance: 50.0,
             sensitivity: 0.002,
             velocity: Vec2::ZERO,
             speed: 50.0,

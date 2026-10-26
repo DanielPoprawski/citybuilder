@@ -1,14 +1,17 @@
-use std::f32::consts::PI;
+// use std::f32::consts::PI;
 
 mod camera;
 mod chunk;
-use crate::chunk::load_chunk;
+use crate::chunk::{load_chunk, TerrainParams};
 use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     pbr::CascadeShadowConfigBuilder,
     prelude::*,
 };
+use bevy_inspector_egui::bevy_egui::EguiPlugin;
+use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use camera::{FreeCamera, OrbitCamera};
+use chunk::Chunk;
 
 use iyes_perf_ui::{prelude::PerfUiAllEntries, PerfUiPlugin};
 use rand::random;
@@ -16,8 +19,15 @@ use rand::random;
 const WINDOW_WIDTH: f32 = 1920.0;
 const WINDOW_HEIGHT: f32 = 1080.0;
 const WORLD_SIZE: u8 = 8; // World size in chunks
-const CHUNK_SIZE: u64 = 512; // Chunk size in points (vertices)
+const CHUNK_SIZE: u64 = 128; // Chunk size in points (vertices)
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
+
+// Coordinate System reference:
+//  +/- X = East/West
+//  +/- Y = Up/Down
+//  +/- Z = South/North
+// Pitch = vertical movement (Pitcher of water goes up/down)
+// Yaw = horizontal movement
 
 fn main() {
     App::new()
@@ -35,7 +45,19 @@ fn main() {
         .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
         .add_plugins(camera::CameraPlugin)
+        .init_resource::<TerrainParams>()
+        .register_type::<TerrainParams>()
+        .add_plugins(EguiPlugin {
+            enable_multipass_for_primary_context: true,
+        })
+        .add_plugins(ResourceInspectorPlugin::<TerrainParams>::default())
         .add_plugins(PerfUiPlugin::default())
+        .add_systems(
+            Update,
+            regenerate_chunks.run_if(
+                resource_changed::<TerrainParams>.and(not(resource_added::<TerrainParams>)),
+            ),
+        )
         .run();
 }
 
@@ -43,6 +65,7 @@ fn startup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    params: Res<TerrainParams>,
 ) {
     // One shared material for the whole terrain: the grayscale grass bitmap
     // tinted green by base_color, rather than 64 copies of the same thing.
@@ -61,7 +84,13 @@ fn startup(
                 // i = x offset
                 // j = z offset
                 // random = seed
-                Mesh3d(asset_server.add(load_chunk(CHUNK_SIZE, i as u64, j as u64, random))),
+                Mesh3d(
+                    asset_server.add(load_chunk(CHUNK_SIZE, i as u64, j as u64, random, &params)),
+                ),
+                Chunk {
+                    x: i as u64,
+                    z: j as u64,
+                },
                 MeshMaterial3d(grass_material.clone()),
                 Transform::from_xyz(
                     i as f32 * (CHUNK_SIZE - 1) as f32,
@@ -85,13 +114,10 @@ fn startup(
             color: Color::srgb(1.0, 0.95, 0.8), // slightly warm sunlight
             illuminance: 10000.0,
             shadows_enabled: false,
+
             ..default()
         },
-        Transform {
-            translation: Vec3::new(0.0, 200.0, 0.0),
-            rotation: Quat::from_rotation_x(-PI / 4.),
-            ..default()
-        },
+        Transform::default().looking_to(Vec3::new(-1.0, -0.5, -0.4), Vec3::Y),
         CascadeShadowConfigBuilder {
             first_cascade_far_bound: 500.0,
             ..default()
@@ -100,6 +126,17 @@ fn startup(
     ));
 
     commands.spawn(PerfUiAllEntries::default()); // FPS helper
+}
+
+fn regenerate_chunks(
+    params: Res<TerrainParams>,
+    chunks: Query<(&Chunk, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (chunk, mesh3d) in &chunks {
+        let mesh = meshes.get_mut(&mesh3d.0).unwrap();
+        *mesh = load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params.seed, &params);
+    }
 }
 
 /// Loads the grass tile with a Repeat sampler so UVs past 1.0 wrap around
