@@ -18,8 +18,8 @@ use rand::random;
 
 const WINDOW_WIDTH: f32 = 1920.0;
 const WINDOW_HEIGHT: f32 = 1080.0;
-const WORLD_SIZE: u8 = 8; // World size in chunks
-const CHUNK_SIZE: u64 = 128; // Chunk size in points (vertices)
+const WORLD_SIZE: u8 = 32; // World size in chunks
+const CHUNK_SIZE: u64 = 16; // Chunk size in points (vertices)
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
 
 // Coordinate System reference:
@@ -117,7 +117,7 @@ fn startup(
 
             ..default()
         },
-        Transform::default().looking_to(Vec3::new(-1.0, -0.5, -0.4), Vec3::Y),
+        Transform::default().looking_to(Vec3::new(-0.3, -0.5, -0.3), Vec3::Y),
         CascadeShadowConfigBuilder {
             first_cascade_far_bound: 500.0,
             ..default()

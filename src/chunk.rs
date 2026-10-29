@@ -15,6 +15,8 @@ use rand::random;
 #[derive(Resource, Reflect, InspectorOptions)]
 #[reflect(Resource, InspectorOptions)]
 pub struct TerrainParams {
+    #[inspector(min = 1.0, max = 100.0, display = NumberDisplay::Slider)]
+    pub continentality: f64,
     #[inspector(min = 1, max = 12, display = NumberDisplay::Slider)]
     pub octaves: u32,
     #[inspector(min = -3.0, max = 3.0, display = NumberDisplay::Slider)]
@@ -37,11 +39,12 @@ pub struct Chunk {
 impl Default for TerrainParams {
     fn default() -> Self {
         Self {
-            octaves: 8,       // 4-6 is ideal
-            gain: 0.4,        // -0.5 to 0.5
-            lacunarity: 2.0,  // around 2
+            continentality: 10.,
+            octaves: 12,      // 4-6 is ideal
+            gain: 0.41,       // -0.5 to 0.5
+            lacunarity: 2.3,  // around 2
             frequency: 0.002, // 0.001 - 0.0001
-            amplitude: 40.0,  // 10 - 40
+            amplitude: 24.0,  // 10 - 40
             seed: random(),
         }
     }
@@ -55,6 +58,7 @@ pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32, params: &TerrainParams) 
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut colors: Vec<[f32; 4]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
 
     let perlin = Perlin::new(seed);
 
@@ -63,33 +67,47 @@ pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32, params: &TerrainParams) 
             let world_i = x_offset + i; // Offset for perlin noise, absolute coordinates
             let world_j = z_offset + j;
 
+            let neighbor_north = height_at(&perlin, params, world_i as f64, world_j as f64 - 1.);
+            let neighbor_south = height_at(&perlin, params, world_i as f64, world_j as f64 + 1.);
+            let neighbor_east = height_at(&perlin, params, world_i as f64, world_j as f64 + 1.);
+            let neighbor_west = height_at(&perlin, params, world_i as f64, world_j as f64 - 1.);
+            let normal_vec = Vec3::new(
+                ((neighbor_south - neighbor_north) / 2.) as f32,
+                1.0,
+                ((neighbor_west - neighbor_east) / 2.) as f32,
+            )
+            .normalize();
+            normals.push(normal_vec.into());
             // Slope terrain using absolute coordinates
-            let mut y = 0.0;
             // let octaves = 8;
             //
             // let mut amplitude = 40.0; // Size of the hills
             // let mut frequency = 0.002; // Width of the hills
 
-            let mut amplitude = params.amplitude; // Size of the hills
-            let mut frequency = params.frequency; // Width of the hills
-                                                  // let gain = 0.4; // How quickly the amplitude decreases, how noisy the terrain is
-                                                  // let lacunarity = 2.0; // How quickly the frequency increases, how detailed the terrain is
+            // let mut amplitude = params.amplitude; // Size of the hills
+            // let mut frequency = params.frequency; // Width of the hills
+            // let gain = 0.4; // How quickly the amplitude decreases, how noisy the terrain is
+            // let lacunarity = 2.0; // How quickly the frequency increases, how detailed the terrain is
 
-            for i in 0..params.octaves {
-                let o: f64 = i as f64 * 17.13;
-                y += (1.
-                    - perlin
-                    .get([
-                        world_i as f64 * frequency + o,
-                        world_j as f64 * frequency - o,
-                    ])
-                    .abs()).powf(2.78) // -abs() to make sharper ridges and crests 
-                    * amplitude;
-                amplitude *= params.gain;
-                frequency *= params.lacunarity;
-            }
+            // for i in 0..params.octaves {
+            //     let o: f64 = i as f64 * 17.13;
+            //     y += (1.
+            //         - perlin
+            //         .get([
+            //             world_i as f64 * frequency + o,
+            //             world_j as f64 * frequency - o,
+            //         ])
+            //         .abs()).powf(2.78) // -abs() to make sharper ridges and crests
+            //         * amplitude;
+            //     amplitude *= params.gain;
+            //     frequency *= params.lacunarity;
+            // }
 
-            positions.push([i as f32, y as f32, j as f32]); // local coordinates
+            positions.push([
+                i as f32,
+                height_at(&perlin, params, world_i as f64, world_j as f64) as f32,
+                j as f32,
+            ]); // local coordinates
 
             // UVs in *world* units, not 0..1 across the chunk. Dividing by the
             // tile size makes one texture repeat cover GRASS_TILE_WORLD_SIZE
@@ -128,7 +146,6 @@ pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32, params: &TerrainParams) 
         }
     }
 
-    let normals = vec![[0.0, 1.0, 0.0]; (size * size) as usize];
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -141,4 +158,29 @@ pub fn load_chunk(size: u64, x: u64, z: u64, seed: u32, params: &TerrainParams) 
     mesh.insert_indices(Indices::U32(indices));
 
     return mesh;
+}
+
+pub fn height_at(perlin: &Perlin, params: &TerrainParams, x: f64, z: f64) -> f32 {
+    let mut y = 0.0;
+    let mut amplitude = params.amplitude;
+    let mut frequency = params.frequency;
+    let power: f64 = if params.octaves < 2 { 2.718 } else { 1. };
+
+    for i in 0..params.octaves {
+        let o: f64 = i as f64 * 17.13;
+
+        y +=
+            (1. - perlin.get([x * frequency + o, z * frequency - o]).abs()).powf(power) * amplitude;
+        amplitude *= params.gain;
+        frequency *= params.lacunarity;
+    }
+
+    y *= perlin
+        .get([
+            x * frequency * params.continentality.powi(-1),
+            z * frequency * params.continentality.powi(-1),
+        ])
+        .powi(2);
+
+    y as f32
 }
