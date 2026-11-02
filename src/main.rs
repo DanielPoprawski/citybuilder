@@ -7,18 +7,17 @@ use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     pbr::CascadeShadowConfigBuilder,
     prelude::*,
+    tasks::ComputeTaskPool,
 };
 use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use camera::{FreeCamera, OrbitCamera};
 use chunk::Chunk;
-
 use iyes_perf_ui::{prelude::PerfUiAllEntries, PerfUiPlugin};
-use rand::random;
 
 const WINDOW_WIDTH: f32 = 1920.0;
 const WINDOW_HEIGHT: f32 = 1080.0;
-const WORLD_SIZE: u8 = 32; // World size in chunks
+const WORLD_SIZE: u16 = 128; // World size in chunks
 const CHUNK_SIZE: u64 = 16; // Chunk size in points (vertices)
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
 
@@ -28,6 +27,7 @@ pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat
 //  +/- Z = South/North
 // Pitch = vertical movement (Pitcher of water goes up/down)
 // Yaw = horizontal movement
+// 1 unit = 1 meter
 
 fn main() {
     App::new()
@@ -75,33 +75,35 @@ fn startup(
         perceptual_roughness: 1.0, // Prevents map from looking shiny
         ..Default::default()
     });
+    let params = &*params;
+    let asset_server = &*asset_server;
+    let grass_material = &grass_material;
 
-    let random = random(); // Create random seed and pass it into each chunk
-    for i in 0..WORLD_SIZE {
-        for j in 0..WORLD_SIZE {
-            commands.spawn((
-                // Create chunks, letting  each one know its offset in the perlin noise seed
-                // i = x offset
-                // j = z offset
-                // random = seed
-                Mesh3d(
-                    asset_server.add(load_chunk(CHUNK_SIZE, i as u64, j as u64, random, &params)),
-                ),
-                Chunk {
-                    x: i as u64,
-                    z: j as u64,
-                },
-                MeshMaterial3d(grass_material.clone()),
-                Transform::from_xyz(
-                    i as f32 * (CHUNK_SIZE - 1) as f32,
-                    0.0,
-                    j as f32 * (CHUNK_SIZE - 1) as f32,
-                    // Transform each chunk to appropriate spot, but offset by one to get rid of
-                    // seams.
-                ),
-            ));
+    let chunks = ComputeTaskPool::get().scope(|scope| {
+        for i in 0..WORLD_SIZE {
+            for j in 0..WORLD_SIZE {
+                scope.spawn(async move {
+                    let mesh = load_chunk(CHUNK_SIZE, i as u64, j as u64, params);
+                    (
+                        Mesh3d(asset_server.add(mesh)),
+                        Chunk {
+                            x: i as u64,
+                            z: j as u64,
+                        },
+                        MeshMaterial3d(grass_material.clone()),
+                        Transform::from_xyz(
+                            i as f32 * (CHUNK_SIZE - 1) as f32,
+                            0.0,
+                            j as f32 * (CHUNK_SIZE - 1) as f32,
+                            // Transform each chunk to appropriate spot, but offset by one to get rid of
+                            // seams.
+                        ),
+                    )
+                });
+            }
         }
-    }
+    });
+    commands.spawn_batch(chunks);
     // Sky color
     commands.insert_resource(ClearColor(Color::srgb(0.4, 0.6, 0.9)));
     commands.spawn((
@@ -110,11 +112,15 @@ fn startup(
         OrbitCamera { ..default() },
     ));
     commands.spawn((
+        Mesh3d(asset_server.add(Cuboid::new(1., 2., 1.).mesh().into())),
+        MeshMaterial3d(asset_server.add(StandardMaterial::default())),
+        Transform::from_xyz(100.0, 40.0, 100.0),
+    ));
+    commands.spawn((
         DirectionalLight {
             color: Color::srgb(1.0, 0.95, 0.8), // slightly warm sunlight
             illuminance: 10000.0,
-            shadows_enabled: false,
-
+            shadows_enabled: true,
             ..default()
         },
         Transform::default().looking_to(Vec3::new(-0.3, -0.5, -0.3), Vec3::Y),
@@ -133,9 +139,19 @@ fn regenerate_chunks(
     chunks: Query<(&Chunk, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    for (chunk, mesh3d) in &chunks {
-        let mesh = meshes.get_mut(&mesh3d.0).unwrap();
-        *mesh = load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params.seed, &params);
+    // for (chunk, mesh3d) in &chunks {
+    //     let mesh = meshes.get_mut(&mesh3d.0).unwrap();
+    //     *mesh = load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params.seed, &params);
+    // }
+    let params = &*params;
+    let generated: Vec<Mesh> = ComputeTaskPool::get().scope(|scope| {
+        for (chunk, _) in &chunks {
+            scope.spawn(async move { load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params) });
+        }
+        // TODO: iterates the query twice and zips the results (once to start the tasks, once to write the meshes). That only works if both passes return entities in the same order. It does today, but nothing guarantees it. Have each task return the mesh paired with what it belongs to, such as a cloned Handle<Mesh> moved into the async move block. Then there's no order to depend on.
+    });
+    for ((_, mesh3d), mesh) in chunks.iter().zip(generated) {
+        *meshes.get_mut(&mesh3d.0).unwrap() = mesh;
     }
 }
 
