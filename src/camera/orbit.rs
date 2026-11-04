@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use bevy::input::{mouse::MouseMotion, ButtonInput};
-use bevy::window::{CursorGrabMode, Window};
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use bevy::{math::Quat, prelude::*};
 
 #[derive(Component)]
@@ -51,10 +51,10 @@ impl Default for OrbitCamera {
 pub(super) fn update(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    mut mouse_movement: EventReader<MouseMotion>,
+    mut mouse_movement: MessageReader<MouseMotion>,
     mut query: Query<(&mut Transform, &mut OrbitCamera), With<Camera3d>>,
     time: Res<Time>,
-    mut windows: Query<&mut Window>,
+    mut cursor_options: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let delta = time.delta_secs();
     for (mut transform, mut controller) in query.iter_mut() {
@@ -94,12 +94,15 @@ pub(super) fn update(
 
         controller.update_transform(&mut transform);
 
-        if mouse_input.pressed(MouseButton::Right) {
-            if let Ok(mut window) = windows.single_mut() {
-                window.cursor_options.grab_mode = CursorGrabMode::Locked;
-                window.cursor_options.visible = false;
-            }
+        if mouse_input.just_pressed(MouseButton::Right) {
+            cursor_options.grab_mode = CursorGrabMode::Locked;
+            cursor_options.visible = false;
+        } else {
+            cursor_options.grab_mode = CursorGrabMode::None;
+            cursor_options.visible = true;
+        }
 
+        if mouse_input.pressed(MouseButton::Right) {
             let mut cumulative_movement = Vec2::ZERO;
             for event in mouse_movement.read() {
                 cumulative_movement += event.delta;
@@ -114,10 +117,6 @@ pub(super) fn update(
         } else {
             mouse_movement.clear();
             controller.velocity *= 0.2;
-            if let Ok(mut window) = windows.single_mut() {
-                window.cursor_options.grab_mode = CursorGrabMode::None;
-                window.cursor_options.visible = true;
-            }
         }
     }
 }

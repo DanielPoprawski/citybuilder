@@ -5,7 +5,7 @@ mod chunk;
 use crate::chunk::{load_chunk, TerrainParams};
 use bevy::{
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
-    pbr::CascadeShadowConfigBuilder,
+    light::CascadeShadowConfigBuilder,
     prelude::*,
     tasks::ComputeTaskPool,
 };
@@ -13,10 +13,9 @@ use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use camera::{FreeCamera, OrbitCamera};
 use chunk::Chunk;
-use iyes_perf_ui::{prelude::PerfUiAllEntries, PerfUiPlugin};
 
-const WINDOW_WIDTH: f32 = 1920.0;
-const WINDOW_HEIGHT: f32 = 1080.0;
+const WINDOW_WIDTH: u32 = 1920;
+const WINDOW_HEIGHT: u32 = 1080;
 const WORLD_SIZE: u16 = 128; // World size in chunks
 const CHUNK_SIZE: u64 = 16; // Chunk size in points (vertices)
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
@@ -46,12 +45,8 @@ fn main() {
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
         .add_plugins(camera::CameraPlugin)
         .init_resource::<TerrainParams>()
-        .register_type::<TerrainParams>()
-        .add_plugins(EguiPlugin {
-            enable_multipass_for_primary_context: true,
-        })
+        .add_plugins(EguiPlugin::default())
         .add_plugins(ResourceInspectorPlugin::<TerrainParams>::default())
-        .add_plugins(PerfUiPlugin::default())
         .add_systems(
             Update,
             regenerate_chunks.run_if(
@@ -130,8 +125,6 @@ fn startup(
         }
         .build(),
     ));
-
-    commands.spawn(PerfUiAllEntries::default()); // FPS helper
 }
 
 fn regenerate_chunks(

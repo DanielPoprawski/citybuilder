@@ -3,7 +3,7 @@ use core::f32;
 use crate::GRASS_TILE_WORLD_SIZE;
 use bevy::{
     asset::RenderAssetUsages,
-    render::mesh::{Indices, Mesh, PrimitiveTopology},
+    mesh::{Indices, Mesh, PrimitiveTopology},
 };
 use noise::{NoiseFn, Perlin};
 
@@ -15,12 +15,12 @@ use rand::random;
 #[derive(Resource, Reflect, InspectorOptions, Clone, Copy)]
 #[reflect(Resource, InspectorOptions)]
 pub struct TerrainParams {
-    #[inspector(min = 500.0, max = 5000.0, display = NumberDisplay::Slider, speed = 50.)]
+    #[inspector(min = 500.0, max = 5000.0, display = NumberDisplay::Slider, speed = 50_f32)]
     pub continentality: f64,
     pub seed: u32,
-    #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider, speed = 0.01)]
+    #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider, speed = 0.01_f32)]
     pub edge0: f64,
-    #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider, speed = 0.01)]
+    #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider, speed = 0.01_f32)]
     pub edge1: f64,
     pub plains: Biome,
     pub mountains: Biome,
@@ -33,11 +33,11 @@ pub struct Biome {
     pub octaves: u32,
     #[inspector(min = 1., max = 100., display = NumberDisplay::Slider)]
     pub amplitude: f32,
-    #[inspector(min = 0., max = 1., display = NumberDisplay::Slider, speed = 0.01)]
+    #[inspector(min = 0., max = 1., display = NumberDisplay::Slider, speed = 0.01_f32)]
     pub gain: f64,
-    #[inspector(min = 1.5, max = 3.0, display = NumberDisplay::Slider, speed = 0.01)]
+    #[inspector(min = 1.5, max = 3.0, display = NumberDisplay::Slider, speed = 0.01_f32)]
     pub lacunarity: f64,
-    #[inspector(min = 0., max = 0.02, display = NumberDisplay::Slider, speed = 0.001)]
+    #[inspector(min = 0., max = 0.02, display = NumberDisplay::Slider, speed = 0.001_f32)]
     pub frequency: f64,
     pub noise_shape: NoiseShape,
 }
