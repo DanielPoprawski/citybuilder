@@ -14,8 +14,8 @@ use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use camera::{FreeCamera, OrbitCamera};
 use chunk::Chunk;
 
-const WINDOW_WIDTH: u32 = 1920;
-const WINDOW_HEIGHT: u32 = 1080;
+const WINDOW_WIDTH: u32 = 2440;
+const WINDOW_HEIGHT: u32 = 1440;
 const WORLD_SIZE: u16 = 128; // World size in chunks
 const CHUNK_SIZE: u64 = 16; // Chunk size in points (vertices)
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
@@ -50,7 +50,7 @@ fn main() {
         .add_systems(
             Update,
             regenerate_chunks.run_if(
-                resource_changed::<TerrainParams>.and(not(resource_added::<TerrainParams>)),
+                resource_changed::<TerrainParams>.and_then(not(resource_added::<TerrainParams>)),
             ),
         )
         .run();
@@ -115,7 +115,6 @@ fn startup(
         DirectionalLight {
             color: Color::srgb(1.0, 0.95, 0.8), // slightly warm sunlight
             illuminance: 10000.0,
-            shadows_enabled: true,
             ..default()
         },
         Transform::default().looking_to(Vec3::new(-0.3, -0.5, -0.3), Vec3::Y),
@@ -152,11 +151,14 @@ fn regenerate_chunks(
 /// instead of clamping to the edge pixel. The settings closure runs as part
 /// of the load itself, so no follow-up system is needed.
 fn load_grass_texture(asset_server: &AssetServer) -> Handle<Image> {
-    asset_server.load_with_settings("grass_tile.png", |settings: &mut ImageLoaderSettings| {
-        settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            address_mode_v: ImageAddressMode::Repeat,
-            ..default()
-        });
-    })
+    asset_server
+        .load_builder()
+        .with_settings(|settings: &mut ImageLoaderSettings| {
+            settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                address_mode_u: ImageAddressMode::Repeat,
+                address_mode_v: ImageAddressMode::Repeat,
+                ..default()
+            });
+        })
+        .load("grass_tile.png")
 }
