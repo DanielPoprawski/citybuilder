@@ -4,6 +4,7 @@ mod camera;
 mod chunk;
 use crate::chunk::{load_chunk, TerrainParams};
 use bevy::{
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     light::CascadeShadowConfigBuilder,
     prelude::*,
@@ -47,6 +48,7 @@ fn main() {
         .init_resource::<TerrainParams>()
         .add_plugins(EguiPlugin::default())
         .add_plugins(ResourceInspectorPlugin::<TerrainParams>::default())
+        .add_plugins(FpsOverlayPlugin::default())
         .add_systems(
             Update,
             regenerate_chunks.run_if(
@@ -78,7 +80,7 @@ fn startup(
         for i in 0..WORLD_SIZE {
             for j in 0..WORLD_SIZE {
                 scope.spawn(async move {
-                    let mesh = load_chunk(CHUNK_SIZE, i as u64, j as u64, params);
+                    let mesh = load_chunk(CHUNK_SIZE, i as u64, j as u64, params, 1.);
                     (
                         Mesh3d(asset_server.add(mesh)),
                         Chunk {
@@ -138,7 +140,7 @@ fn regenerate_chunks(
     let params = &*params;
     let generated: Vec<Mesh> = ComputeTaskPool::get().scope(|scope| {
         for (chunk, _) in &chunks {
-            scope.spawn(async move { load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params) });
+            scope.spawn(async move { load_chunk(CHUNK_SIZE, chunk.x, chunk.z, params, 1.) });
         }
         // TODO: iterates the query twice and zips the results (once to start the tasks, once to write the meshes). That only works if both passes return entities in the same order. It does today, but nothing guarantees it. Have each task return the mesh paired with what it belongs to, such as a cloned Handle<Mesh> moved into the async move block. Then there's no order to depend on.
     });

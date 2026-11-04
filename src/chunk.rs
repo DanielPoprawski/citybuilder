@@ -41,7 +41,7 @@ pub struct Biome {
     pub frequency: f64,
     pub noise_shape: NoiseShape,
 }
-#[derive(Clone, Copy, Reflect)]
+#[derive(Clone, Copy, Reflect, PartialEq)]
 pub enum NoiseShape {
     Standard,
     Ridged,
@@ -80,7 +80,7 @@ impl Default for TerrainParams {
     }
 }
 
-pub fn load_chunk(size: u64, x: u64, z: u64, params: &TerrainParams) -> Mesh {
+pub fn load_chunk(size: u64, x: u64, z: u64, params: &TerrainParams, spacing: f32) -> Mesh {
     let x_offset = x * (size - 1); // Prevents seams
     let z_offset = z * (size - 1);
 
@@ -92,18 +92,34 @@ pub fn load_chunk(size: u64, x: u64, z: u64, params: &TerrainParams) -> Mesh {
 
     let perlin = Perlin::new(params.seed);
 
+    let w = size as usize + 2;
+    let mut heights = vec![0.0_f32; w * w];
+    for i in 0..w {
+        for j in 0..w {
+            heights[i * w + j] = height_at(
+                &perlin,
+                params,
+                x_offset as f64 + i as f64,
+                z_offset as f64 + j as f64,
+            );
+        }
+    }
+    let h = |i: usize, j: usize| -> f32 { heights[i * w + j] };
     for i in 0..size {
         for j in 0..size {
             let world_i = x_offset + i; // Offset for perlin noise, absolute coordinates
             let world_j = z_offset + j;
 
-            let neighbor_north = height_at(&perlin, params, world_i as f64, world_j as f64 - 1.);
-            let neighbor_south = height_at(&perlin, params, world_i as f64, world_j as f64 + 1.);
-            let neighbor_east = height_at(&perlin, params, world_i as f64 + 1., world_j as f64);
-            let neighbor_west = height_at(&perlin, params, world_i as f64 - 1., world_j as f64);
+            let gi = i as usize + 1;
+            let gj = j as usize + 1;
+
+            let neighbor_north = h(gi, gj - 1);
+            let neighbor_south = h(gi, gj + 1);
+            let neighbor_east = h(gi + 1, gj);
+            let neighbor_west = h(gi - 1, gj);
             let normal_vec = Vec3::new(
                 (neighbor_west - neighbor_east) as f32,
-                2.0,
+                2.0 * spacing,
                 (neighbor_north - neighbor_south) as f32,
             )
             .normalize();
@@ -180,7 +196,11 @@ fn fbm(perlin: &Perlin, biome: &Biome, x: f64, z: f64) -> f64 {
         let perlin_x = x * frequency + o;
         let perlin_z = z * frequency - o;
         let perlin_result = perlin.get([perlin_x, perlin_z]);
-        y += (1. - (perlin_result).abs()).powi(2) * weight * amplitude;
+        if biome.noise_shape == NoiseShape::Standard {
+            y += perlin_result * weight * amplitude;
+        } else if biome.noise_shape == NoiseShape::Ridged {
+            y += (1. - (perlin_result).abs()).powi(2) * weight * amplitude;
+        }
         weight *= y / amplitude;
         weight = weight.clamp(0., 1.);
         amplitude *= biome.gain;
