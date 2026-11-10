@@ -1,4 +1,6 @@
-use crate::{smoothstep, CHUNK_SIZE, GRASS_TILE_WORLD_SIZE, LOAD_RADIUS, MAX_CHUNKS, SPACING};
+use crate::{
+    smoothstep, CHUNK_SIZE, GRASS_TILE_WORLD_SIZE, LOAD_RADIUS, LOD_DETAIL, MAX_CHUNKS, SPACING,
+};
 use bevy::{
     asset::RenderAssetUsages,
     mesh::{Indices, Mesh, PrimitiveTopology},
@@ -63,7 +65,17 @@ pub struct GrassMaterial(pub Handle<StandardMaterial>);
 pub struct ChunkMap(HashMap<IVec2, Entity>);
 
 #[derive(Component)]
-pub struct ChunkTask(Task<Mesh>);
+pub struct ChunkTask(pub Task<(Mesh, Vec<f32>)>);
+
+#[derive(Component)]
+pub struct ChunkHeights(pub Vec<f32>);
+
+#[derive(Component)]
+pub struct ChunkLod {
+    pub level: u32,
+}
+#[derive(Component)]
+pub struct LodTask(pub Task<Mesh>);
 
 impl Default for TerrainParams {
     fn default() -> Self {
@@ -94,35 +106,68 @@ impl Default for TerrainParams {
     }
 }
 
-pub fn load_chunk(size: i64, x: i64, z: i64, params: &TerrainParams, spacing: f32) -> Mesh {
-    let x_offset = x * (size - 1); // Prevents seams
-    let z_offset = z * (size - 1);
+pub fn load_chunk(
+    size: i64,
+    x: i64,
+    z: i64,
+    params: &TerrainParams,
+    spacing: f32,
+) -> (Mesh, Vec<f32>) {
+    let perlin = Perlin::new(params.seed);
+    let heights = sample_heights(size, x * (size - 1), z * (size - 1), params, &perlin);
+    let mut dist: usize = ((x * x + z * z) as f32).powf(0.5) as usize;
+    dist /= LOD_DETAIL as usize;
+    dist = (dist as f32).ln().max(0.0) as usize;
+    let step = 1usize << dist.min(CHUNK_SIZE as usize - 1);
+    let mesh = build_mesh(
+        size,
+        x * (size - 1),
+        z * (size - 1),
+        spacing,
+        step,
+        &heights,
+        &perlin,
+    );
+    (mesh, heights)
+}
 
+pub fn sample_heights(
+    size: i64,
+    x: i64,
+    z: i64,
+    params: &TerrainParams,
+    perlin: &Perlin,
+) -> Vec<f32> {
+    let w = size as usize + 2;
+    let mut heights = vec![0.0_f32; w * w];
+    for i in 0..w {
+        for j in 0..w {
+            heights[i * w + j] =
+                height_at(perlin, params, x as f64 + i as f64, z as f64 + j as f64);
+        }
+    }
+    return heights;
+}
+
+pub fn build_mesh(
+    size: i64,
+    x: i64,
+    z: i64,
+    spacing: f32,
+    step: usize,
+    heights: &Vec<f32>,
+    perlin: &Perlin,
+) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut indices: Vec<u16> = Vec::new();
     let mut colors: Vec<[f32; 4]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
-
-    let perlin = Perlin::new(params.seed);
-
-    let w = size as usize + 2;
-    let mut heights = vec![0.0_f32; w * w];
-    for i in 0..w {
-        for j in 0..w {
-            heights[i * w + j] = height_at(
-                &perlin,
-                params,
-                x_offset as f64 + i as f64,
-                z_offset as f64 + j as f64,
-            );
-        }
-    }
-    let h = |i: usize, j: usize| -> f32 { heights[i * w + j] };
-    for i in 0..size {
-        for j in 0..size {
-            let world_i = x_offset + i; // Offset for perlin noise, absolute coordinates
-            let world_j = z_offset + j;
+    let h = |i: usize, j: usize| -> f32 { heights[i * (size as usize + 2) + j] };
+    for i in (0..size).step_by(step) {
+        for j in (0..size).step_by(step) {
+            let world_i = x + i; // Offset for perlin noise, absolute coordinates
+            let world_j = z + j;
 
             let gi = i as usize + 1;
             let gj = j as usize + 1;
@@ -160,11 +205,13 @@ pub fn load_chunk(size: i64, x: i64, z: i64, params: &TerrainParams, spacing: f3
         }
     }
 
-    for i in 0..size - 1 {
-        for j in 0..size - 1 {
-            let top_left = i * size + j;
+    let row_width: i64 = (size - 1) / step as i64 + 1;
+
+    for i in 0..row_width - 1 {
+        for j in 0..row_width - 1 {
+            let top_left = i * row_width + j;
             let top_right = top_left + 1;
-            let bottom_left = top_left + size;
+            let bottom_left = top_left + row_width;
             let bottom_right = bottom_left + 1;
 
             indices.push(top_left as u16);
@@ -176,7 +223,6 @@ pub fn load_chunk(size: i64, x: i64, z: i64, params: &TerrainParams, spacing: f3
             indices.push(bottom_left as u16);
         }
     }
-
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD,
@@ -187,7 +233,6 @@ pub fn load_chunk(size: i64, x: i64, z: i64, params: &TerrainParams, spacing: f3
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U16(indices));
-
     return mesh;
 }
 
@@ -298,11 +343,13 @@ pub fn finish_chunks(
     grass_material: Res<GrassMaterial>,
 ) {
     for (entity, mut task) in &mut chunk_tasks {
-        if let Some(mesh) = check_ready(&mut task.0) {
+        if let Some((mesh, heights)) = check_ready(&mut task.0) {
             commands.entity(entity).remove::<ChunkTask>();
             commands.entity(entity).insert((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(grass_material.0.clone()),
+                ChunkHeights(heights),
+                ChunkLod { level: 1 },
             ));
         }
     }
