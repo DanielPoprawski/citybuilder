@@ -41,7 +41,7 @@ impl Default for FreeCamera {
             yaw: 0.,
             sensitivity: 0.002,
             velocity: Vec2::ZERO,
-            speed: 50.0,
+            speed: 200.0,
             x: 0.0,
             y: 100.0,
             z: 100.0,
@@ -59,9 +59,9 @@ pub(super) fn update(
     let delta = time.delta_secs();
     for (mut transform, mut controller) in query.iter_mut() {
         if keyboard_input.pressed(KeyCode::KeyF) {
-            controller.speed = 300.0;
+            controller.speed = 600.0;
         } else {
-            controller.speed = 100.0;
+            controller.speed = 200.0;
         }
 
         if keyboard_input.pressed(KeyCode::KeyW) {
@@ -97,7 +97,7 @@ pub(super) fn update(
         if mouse_input.just_pressed(MouseButton::Right) {
             cursor_options.grab_mode = CursorGrabMode::Locked;
             cursor_options.visible = false;
-        } else {
+        } else if mouse_input.just_released(MouseButton::Right) {
             cursor_options.grab_mode = CursorGrabMode::None;
             cursor_options.visible = true;
         }

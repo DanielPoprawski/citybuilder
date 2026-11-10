@@ -2,9 +2,13 @@
 
 mod camera;
 mod chunk;
-use crate::chunk::{load_chunk, TerrainParams};
+mod utils;
+use crate::chunk::{
+    finish_chunks, load_chunk, update_chunks, ChunkMap, GrassMaterial, TerrainParams,
+};
+use crate::utils::*;
 use bevy::{
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
+    dev_tools::fps_overlay::FpsOverlayPlugin,
     image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     light::CascadeShadowConfigBuilder,
     prelude::*,
@@ -14,12 +18,18 @@ use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use camera::{FreeCamera, OrbitCamera};
 use chunk::Chunk;
+use std::f32::consts::PI;
 
+const DAY_LENGTH: f32 = 60.0; // 24 hour period represented in seconds
+const LATITUDE: f32 = 39.74 * PI / 180.; // Latitude used to calculate length of day
+const DAY_OF_YEAR: f32 = 172.0;
 const WINDOW_WIDTH: u32 = 2440;
 const WINDOW_HEIGHT: u32 = 1440;
-const WORLD_SIZE: u16 = 128; // World size in chunks
-const CHUNK_SIZE: u64 = 16; // Chunk size in points (vertices)
+pub const CHUNK_SIZE: i64 = 32; // Chunk size in points (vertices)
+pub const LOAD_RADIUS: i32 = 32;
+pub const MAX_CHUNKS: i32 = 2560;
 pub const GRASS_TILE_WORLD_SIZE: f32 = 8.0; // World units covered by one repeat of the grass texture
+pub const SPACING: f32 = 1.0;
 
 // Coordinate System reference:
 //  +/- X = East/West
@@ -41,6 +51,8 @@ fn main() {
             ..Default::default()
         }))
         .add_systems(Startup, startup)
+        .init_resource::<ChunkMap>()
+        .add_systems(Update, (update_chunks, finish_chunks, update_daylight))
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin)
         .add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin)
@@ -62,7 +74,6 @@ fn startup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    params: Res<TerrainParams>,
 ) {
     // One shared material for the whole terrain: the grayscale grass bitmap
     // tinted green by base_color, rather than 64 copies of the same thing.
@@ -72,35 +83,7 @@ fn startup(
         perceptual_roughness: 1.0, // Prevents map from looking shiny
         ..Default::default()
     });
-    let params = &*params;
-    let asset_server = &*asset_server;
-    let grass_material = &grass_material;
-
-    let chunks = ComputeTaskPool::get().scope(|scope| {
-        for i in 0..WORLD_SIZE {
-            for j in 0..WORLD_SIZE {
-                scope.spawn(async move {
-                    let mesh = load_chunk(CHUNK_SIZE, i as u64, j as u64, params, 1.);
-                    (
-                        Mesh3d(asset_server.add(mesh)),
-                        Chunk {
-                            x: i as u64,
-                            z: j as u64,
-                        },
-                        MeshMaterial3d(grass_material.clone()),
-                        Transform::from_xyz(
-                            i as f32 * (CHUNK_SIZE - 1) as f32,
-                            0.0,
-                            j as f32 * (CHUNK_SIZE - 1) as f32,
-                            // Transform each chunk to appropriate spot, but offset by one to get rid of
-                            // seams.
-                        ),
-                    )
-                });
-            }
-        }
-    });
-    commands.spawn_batch(chunks);
+    commands.insert_resource(GrassMaterial(grass_material));
     // Sky color
     commands.insert_resource(ClearColor(Color::srgb(0.4, 0.6, 0.9)));
     commands.spawn((
@@ -117,11 +100,13 @@ fn startup(
         DirectionalLight {
             color: Color::srgb(1.0, 0.95, 0.8), // slightly warm sunlight
             illuminance: 10000.0,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::default().looking_to(Vec3::new(-0.3, -0.5, -0.3), Vec3::Y),
         CascadeShadowConfigBuilder {
-            first_cascade_far_bound: 500.0,
+            first_cascade_far_bound: 50.0,
+            maximum_distance: 1000.0,
             ..default()
         }
         .build(),
@@ -163,4 +148,43 @@ fn load_grass_texture(asset_server: &AssetServer) -> Handle<Image> {
             });
         })
         .load("grass_tile.png")
+}
+
+fn update_daylight(
+    mut query: Query<(&mut DirectionalLight, &mut Transform)>,
+    time: Res<Time>,
+    mut sky: ResMut<ClearColor>,
+) {
+    let time = time.elapsed_secs() + DAY_OF_YEAR * DAY_LENGTH;
+    let date = time / DAY_LENGTH;
+    let decl = (-23.44 * PI / 180.) * (2. * PI * (date + 10.) / 365.0).cos();
+    let time_of_day = (time * 2. * PI) / (DAY_LENGTH);
+    let sun = LATITUDE.sin() * decl.sin() + LATITUDE.cos() * decl.cos() * time_of_day.cos();
+
+    let g_value = 0.85;
+    let b_value = 0.70;
+
+    let x = -(decl).cos() * time_of_day.sin();
+    let y = sun;
+    let z = LATITUDE.sin() * decl.cos() * time_of_day.cos() - LATITUDE.cos() * decl.sin();
+    let sun_dir = Vec3::new(x, y, z);
+
+    if let Ok((mut light, mut transform)) = query.single_mut() {
+        light.illuminance = sun.max(0.0) * 8_000.0 + 2_000.0; // INFO: extra 2k is moonlight, remove when
+                                                              // adding moon
+        light.color = Color::srgb(
+            1.0,
+            (1. - g_value) * sun.clamp(0., 1.) + g_value,
+            (1. - b_value) * sun.clamp(0., 1.) + b_value,
+        );
+        transform.look_to(-sun_dir, Vec3::Y);
+    }
+
+    let to_horizon = smoothstep(-0.1, 0.0, sun);
+    let to_day = smoothstep(0.0, 0.25, sun);
+
+    let night = Color::srgb(0.03, 0.03, 0.12);
+    let horizon = Color::srgb(0.01, 0.01, 0.04);
+    let daylight = Color::srgb(0.46, 0.66, 0.9);
+    sky.0 = night.mix(&horizon, to_horizon).mix(&daylight, to_day);
 }
